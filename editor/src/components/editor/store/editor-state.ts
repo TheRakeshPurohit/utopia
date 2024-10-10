@@ -31,7 +31,6 @@ import type {
 } from '../../../core/shared/element-template'
 import {
   emptyJsxMetadata,
-  getElementsByUIDFromTopLevelElements,
   isJSExpression,
   isJSXConditionalExpression,
   isJSXElement,
@@ -61,14 +60,12 @@ import type {
   NodeModules,
   ParseSuccess,
   ProjectFile,
-  PropertyPath,
   StaticElementPath,
   TextFile,
 } from '../../../core/shared/project-file-types'
 import {
   RevisionsState,
   codeFile,
-  foldParsedTextFile,
   isParseFailure,
   isParseSuccess,
   isParsedTextFile,
@@ -125,7 +122,6 @@ import type { Notice } from '../../common/notice'
 import type { ShortcutConfiguration } from '../shortcut-definitions'
 import {
   DerivedStateKeepDeepEquality,
-  ElementInstanceMetadataMapKeepDeepEquality,
   InvalidOverrideNavigatorEntryKeepDeepEquality,
   RenderPropNavigatorEntryKeepDeepEquality,
   RenderPropValueNavigatorEntryKeepDeepEquality,
@@ -192,6 +188,7 @@ import type { Collaborator } from '../../../core/shared/multiplayer'
 import type { OnlineState } from '../online-status'
 import type { NavigatorRow } from '../../navigator/navigator-row'
 import type { FancyError } from '../../../core/shared/code-exec-utils'
+import type { GridCellCoordinates } from '../../canvas/canvas-strategies/strategies/grid-cell-bounds'
 
 const ObjectPathImmutable: any = OPI
 
@@ -214,7 +211,6 @@ export enum RightMenuTab {
   Inspector = 'inspector',
   Settings = 'settings',
   Comments = 'comments',
-  RollYourOwn = 'roll-your-own',
 }
 
 // TODO: this should just contain an NpmDependency and a status
@@ -813,6 +809,12 @@ export interface DragToMoveIndicatorFlags {
   ancestor: boolean
 }
 
+export interface GridControlData {
+  grid: ElementPath
+  targetCell: GridCellCoordinates | null // the cell under the mouse
+  rootCell: GridCellCoordinates | null // the top-left cell of the target child
+}
+
 export interface EditorStateCanvasControls {
   // this is where we can put props for the strategy controls
   snappingGuidelines: Array<GuidelineWithSnappingVectorAndPointsOfRelevance>
@@ -823,7 +825,7 @@ export interface EditorStateCanvasControls {
   reparentedToPaths: Array<ElementPath>
   dragToMoveIndicatorFlags: DragToMoveIndicatorFlags
   parentOutlineHighlight: ElementPath | null
-  gridControls: ElementPath | null
+  gridControlData: GridControlData | null
 }
 
 export function editorStateCanvasControls(
@@ -835,7 +837,7 @@ export function editorStateCanvasControls(
   reparentedToPaths: Array<ElementPath>,
   dragToMoveIndicatorFlagsValue: DragToMoveIndicatorFlags,
   parentOutlineHighlight: ElementPath | null,
-  gridControls: ElementPath | null,
+  gridControlData: GridControlData | null,
 ): EditorStateCanvasControls {
   return {
     snappingGuidelines: snappingGuidelines,
@@ -846,7 +848,7 @@ export function editorStateCanvasControls(
     reparentedToPaths: reparentedToPaths,
     dragToMoveIndicatorFlags: dragToMoveIndicatorFlagsValue,
     parentOutlineHighlight: parentOutlineHighlight,
-    gridControls: gridControls,
+    gridControlData: gridControlData,
   }
 }
 
@@ -1075,18 +1077,6 @@ export function editorStateTopMenu(
   return {
     formulaBarMode: formulaBarMode,
     formulaBarFocusCounter: formulaBarFocusCounter,
-  }
-}
-
-export interface EditorStatePreview {
-  visible: boolean
-  connected: boolean
-}
-
-export function editorStatePreview(visible: boolean, connected: boolean): EditorStatePreview {
-  return {
-    visible: visible,
-    connected: connected,
   }
 }
 
@@ -1435,7 +1425,6 @@ export interface EditorState {
   projectSettings: EditorStateProjectSettings
   navigator: NavigatorState
   topmenu: EditorStateTopMenu
-  preview: EditorStatePreview
   home: EditorStateHome
   lastUsedFont: FontSettings | null
   modal: ModalDialog | null
@@ -1519,7 +1508,6 @@ export function editorState(
   projectSettings: EditorStateProjectSettings,
   editorStateNavigator: NavigatorState,
   topmenu: EditorStateTopMenu,
-  preview: EditorStatePreview,
   home: EditorStateHome,
   lastUsedFont: FontSettings | null,
   modal: ModalDialog | null,
@@ -1604,7 +1592,6 @@ export function editorState(
     projectSettings: projectSettings,
     navigator: editorStateNavigator,
     topmenu: topmenu,
-    preview: preview,
     home: home,
     lastUsedFont: lastUsedFont,
     modal: modal,
@@ -2640,7 +2627,7 @@ export function createEditorState(dispatch: EditorDispatch): EditorState {
         reparentedToPaths: [],
         dragToMoveIndicatorFlags: emptyDragToMoveIndicatorFlags,
         parentOutlineHighlight: null,
-        gridControls: null,
+        gridControlData: null,
       },
     },
     inspector: {
@@ -2675,10 +2662,6 @@ export function createEditorState(dispatch: EditorDispatch): EditorState {
     topmenu: {
       formulaBarMode: 'content',
       formulaBarFocusCounter: 0,
-    },
-    preview: {
-      visible: false,
-      connected: false,
     },
     home: {
       visible: false,
@@ -3019,7 +3002,7 @@ export function editorModelFromPersistentModel(
         reparentedToPaths: [],
         dragToMoveIndicatorFlags: emptyDragToMoveIndicatorFlags,
         parentOutlineHighlight: null,
-        gridControls: null,
+        gridControlData: null,
       },
     },
     inspector: {
@@ -3037,10 +3020,6 @@ export function editorModelFromPersistentModel(
     topmenu: {
       formulaBarMode: 'content',
       formulaBarFocusCounter: 0,
-    },
-    preview: {
-      visible: false,
-      connected: false,
     },
     home: {
       visible: false,
@@ -3278,14 +3257,17 @@ export function updatePackageJsonInEditorState(
       // There is a package.json file, we should update it.
       updatedPackageJsonFile = codeFile(
         transformPackageJson(packageJsonFile.fileContents.code),
-        RevisionsState.CodeAhead,
+        null,
         packageJsonFile.versionNumber + 1,
+        RevisionsState.CodeAheadButPleaseTellVSCodeAboutIt,
       )
     } else {
       // There is something else called package.json, we should bulldoze over it.
       updatedPackageJsonFile = codeFile(
         transformPackageJson(JSON.stringify(DefaultPackageJson)),
         null,
+        0,
+        RevisionsState.CodeAheadButPleaseTellVSCodeAboutIt,
       )
     }
   }

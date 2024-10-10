@@ -26,7 +26,7 @@ import { isZeroSizedElement } from '../outline-utils'
 import { createArrayWithLength } from '../../../../core/shared/array-utils'
 import { useGridData } from '../grid-controls'
 
-interface GridGapControlProps {
+export interface GridGapControlProps {
   selectedElement: ElementPath
   updatedGapValueRow: CSSNumberWithRenderedValue | null
   updatedGapValueColumn: CSSNumberWithRenderedValue | null
@@ -154,15 +154,10 @@ export const GridGapControl = controlForStrategyMemoized<GridGapControlProps>((p
 
   const gridRowColumnInfo = useGridData([selectedElement])
 
-  const controlBounds = gridGapControlBoundsFromMetadata(
-    selectedElement,
-    gridRowColumnInfo[0],
-    {
-      row: fallbackEmptyValue(gridGapRow),
-      column: fallbackEmptyValue(gridGapColumn),
-    },
-    scale,
-  )
+  const controlBounds = gridGapControlBoundsFromMetadata(gridRowColumnInfo[0], {
+    row: fallbackEmptyValue(gridGapRow),
+    column: fallbackEmptyValue(gridGapColumn),
+  })
 
   return (
     <CanvasOffsetWrapper>
@@ -457,7 +452,7 @@ function GridGapHandle({
           <CanvasLabel
             value={printCSSNumber(gapValue, null)}
             scale={scale}
-            color={colorTheme.brandNeonPink.value}
+            color={colorTheme.brandNeonOrange.value}
             textColor={colorTheme.white.value}
           />,
         )}
@@ -465,7 +460,7 @@ function GridGapHandle({
       <PillHandle
         width={width}
         height={height}
-        pillColor={colorTheme.brandNeonPink.value}
+        pillColor={colorTheme.brandNeonOrange.value}
         borderWidth={borderWidth}
       />
     </div>

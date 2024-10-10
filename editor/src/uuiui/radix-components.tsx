@@ -53,6 +53,7 @@ type RegularDropdownMenuItem = BaseDropdownMenuItem & {
   label: React.ReactNode
   onSelect: () => void
   disabled?: boolean
+  badge?: string | null
 }
 
 export function regularDropdownMenuItem(
@@ -151,17 +152,31 @@ export const DropdownMenu = React.memo<DropdownMenuProps>((props) => {
                 key={item.id}
                 onSelect={item.onSelect}
                 css={{
+                  opacity: item.disabled ? 0.5 : 1,
                   ':hover': {
                     backgroundColor: item.danger
                       ? colorTheme.errorForeground.value
                       : item.disabled
                       ? 'inherit'
                       : undefined,
+                    [`.item-badge-${item.id}`]: {
+                      color: 'inherit',
+                    },
                   },
                   cursor: item.disabled ? 'default' : undefined,
+                  [`.item-badge-${item.id}`]: {
+                    color: colorTheme.secondaryBlue.value,
+                  },
                 }}
               >
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 4,
+                    alignItems: 'center',
+                    width: '100%',
+                  }}
+                >
                   {when(
                     shouldShowCheckboxes,
                     <div style={{ opacity: item.checked ? 1 : 0 }}>
@@ -172,9 +187,13 @@ export const DropdownMenu = React.memo<DropdownMenuProps>((props) => {
                     shouldShowIcons,
                     <div style={{ opacity: item.icon == null ? 0 : 1 }}>{item.icon}</div>,
                   )}
-                  <span>{item.label}</span>
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {when(
+                    item.badge != null,
+                    <span className={`item-badge-${item.id}`}>{item.badge}</span>,
+                  )}
                 </div>
-                <span style={{ opacity: 0.5 }}>{item.shortcut}</span>
+                {when(item.shortcut != null, <span style={{ opacity: 0.5 }}>{item.shortcut}</span>)}
               </RadixItemContainer>
             )
           })}
@@ -209,7 +228,7 @@ Separator.displayName = 'Separator'
 type RegularRadixSelectOption = {
   type: 'REGULAR'
   value: string
-  label: string
+  label: string | ((isOpen: boolean, currentValue: string | null) => string)
   icon?: IcnProps
   placeholder?: boolean
 }
@@ -235,20 +254,54 @@ export function separatorRadixSelectOption(): Separator {
 
 export type RadixSelectOption = RegularRadixSelectOption | Separator
 
+function optionLabelToString(
+  option: RegularRadixSelectOption | null,
+  isOpen: boolean,
+  currentValue: string | null,
+): string | null {
+  if (option == null) {
+    return null
+  }
+
+  const label = typeof option.label === 'string' ? option.label : option.label(isOpen, currentValue)
+
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)}`
+}
+
 export const RadixSelect = React.memo(
   (props: {
     id: string
     value: RegularRadixSelectOption | null
     options: RadixSelectOption[]
     style?: CSSProperties
+    contentStyle?: CSSProperties
     onValueChange?: (value: string) => void
+    contentClassName?: string
+    onOpenChange?: (open: boolean) => void
   }) => {
     const stopPropagation = React.useCallback((e: React.KeyboardEvent) => {
       e.stopPropagation()
     }, [])
 
+    const { onOpenChange: propsOnOpenChange } = props
+
+    const [isOpen, setIsOpen] = React.useState(false)
+    const onOpenChange = React.useCallback(
+      (open: boolean) => {
+        setIsOpen(open)
+        propsOnOpenChange?.(open)
+      },
+      [propsOnOpenChange],
+    )
+
+    const valueLabel = optionLabelToString(props.value ?? null, isOpen, props.value?.value ?? null)
+
     return (
-      <Select.Root value={props.value?.value} onValueChange={props.onValueChange}>
+      <Select.Root
+        value={props.value?.value}
+        onValueChange={props.onValueChange}
+        onOpenChange={onOpenChange}
+      >
         <Select.Trigger
           style={{
             background: 'transparent',
@@ -271,13 +324,14 @@ export const RadixSelect = React.memo(
             },
           }}
         >
-          <Select.Value placeholder={props.value?.label} />
+          <Select.Value placeholder={valueLabel} />
           <Select.Icon style={{ width: 12, height: 12 }}>
             <SmallerIcons.ExpansionArrowDown />
           </Select.Icon>
         </Select.Trigger>
         <Select.Portal>
           <Select.Content
+            className={props.contentClassName}
             onKeyDown={stopPropagation}
             style={{
               background: colorTheme.black.value,
@@ -286,6 +340,7 @@ export const RadixSelect = React.memo(
               borderRadius: 6,
               color: 'white',
               boxShadow: UtopiaStyles.shadowStyles.high.boxShadow,
+              ...(props.contentStyle ?? {}),
             }}
           >
             <Select.ScrollUpButton>
@@ -311,7 +366,7 @@ export const RadixSelect = React.memo(
                   )
                 }
 
-                const label = `${option.label.charAt(0).toUpperCase()}${option.label.slice(1)}`
+                const label = optionLabelToString(option, isOpen, props.value?.value ?? null)
                 return (
                   <Select.Item
                     key={`select-option-${props.id}-${index}`}

@@ -265,6 +265,7 @@ describe('SpecialSizeMeasurementsKeepDeepEquality', () => {
     gap: 11,
     flexDirection: 'column',
     justifyContent: 'center',
+    alignContent: null,
     alignItems: 'auto',
     htmlElementName: 'div',
     renderedChildrenCount: 10,
@@ -321,6 +322,9 @@ describe('SpecialSizeMeasurementsKeepDeepEquality', () => {
     },
     rowGap: null,
     columnGap: null,
+    gridCellGlobalFrames: null,
+    justifySelf: null,
+    alignSelf: null,
   }
 
   const newDifferentValue: SpecialSizeMeasurements = {
@@ -383,6 +387,7 @@ describe('SpecialSizeMeasurementsKeepDeepEquality', () => {
     gap: 11,
     flexDirection: 'column',
     justifyContent: 'center',
+    alignContent: null,
     alignItems: 'auto',
     htmlElementName: 'div',
     renderedChildrenCount: 10,
@@ -439,6 +444,9 @@ describe('SpecialSizeMeasurementsKeepDeepEquality', () => {
     },
     rowGap: null,
     columnGap: null,
+    gridCellGlobalFrames: null,
+    justifySelf: null,
+    alignSelf: null,
   }
 
   it('same reference returns the same reference', () => {
@@ -556,6 +564,7 @@ describe('ElementInstanceMetadataKeepDeepEquality', () => {
       gap: 11,
       flexDirection: 'column',
       justifyContent: 'center',
+      alignContent: null,
       alignItems: 'auto',
       htmlElementName: 'div',
       renderedChildrenCount: 10,
@@ -612,6 +621,9 @@ describe('ElementInstanceMetadataKeepDeepEquality', () => {
       },
       rowGap: null,
       columnGap: null,
+      gridCellGlobalFrames: null,
+      justifySelf: null,
+      alignSelf: null,
     },
     computedStyle: {
       a: 'a',
@@ -706,6 +718,7 @@ describe('ElementInstanceMetadataKeepDeepEquality', () => {
       gap: 11,
       flexDirection: 'column',
       justifyContent: 'center',
+      alignContent: null,
       alignItems: 'auto',
       htmlElementName: 'div',
       renderedChildrenCount: 10,
@@ -762,6 +775,9 @@ describe('ElementInstanceMetadataKeepDeepEquality', () => {
       },
       rowGap: null,
       columnGap: null,
+      gridCellGlobalFrames: null,
+      justifySelf: null,
+      alignSelf: null,
     },
     computedStyle: {
       a: 'a',
@@ -881,6 +897,7 @@ describe('ElementInstanceMetadataMapKeepDeepEquality', () => {
         gap: 11,
         flexDirection: 'column',
         justifyContent: 'center',
+        alignContent: null,
         alignItems: 'auto',
         htmlElementName: 'div',
         renderedChildrenCount: 10,
@@ -937,6 +954,9 @@ describe('ElementInstanceMetadataMapKeepDeepEquality', () => {
         },
         rowGap: null,
         columnGap: null,
+        gridCellGlobalFrames: null,
+        justifySelf: null,
+        alignSelf: null,
       },
       computedStyle: {
         a: 'a',
@@ -1033,6 +1053,7 @@ describe('ElementInstanceMetadataMapKeepDeepEquality', () => {
         gap: 11,
         flexDirection: 'column',
         justifyContent: 'center',
+        alignContent: null,
         alignItems: 'auto',
         htmlElementName: 'div',
         renderedChildrenCount: 10,
@@ -1089,6 +1110,9 @@ describe('ElementInstanceMetadataMapKeepDeepEquality', () => {
         },
         rowGap: null,
         columnGap: null,
+        gridCellGlobalFrames: null,
+        justifySelf: null,
+        alignSelf: null,
       },
       computedStyle: {
         a: 'a',
@@ -1185,6 +1209,7 @@ describe('ElementInstanceMetadataMapKeepDeepEquality', () => {
         gap: 11,
         flexDirection: 'column',
         justifyContent: 'center',
+        alignContent: null,
         alignItems: 'auto',
         htmlElementName: 'div',
         renderedChildrenCount: 10,
@@ -1241,6 +1266,9 @@ describe('ElementInstanceMetadataMapKeepDeepEquality', () => {
         },
         rowGap: null,
         columnGap: null,
+        gridCellGlobalFrames: null,
+        justifySelf: null,
+        alignSelf: null,
       },
       computedStyle: {
         a: 'a',

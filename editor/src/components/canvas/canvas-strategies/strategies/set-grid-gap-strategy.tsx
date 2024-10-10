@@ -12,7 +12,7 @@ import { printCSSNumber } from '../../../inspector/common/css-utils'
 import { stylePropPathMappingFn } from '../../../inspector/common/property-path-hooks'
 import { deleteProperties } from '../../commands/delete-properties-command'
 import { setCursorCommand } from '../../commands/set-cursor-command'
-import { setElementsToRerenderCommand } from '../../commands/set-elements-to-rerender-command'
+
 import { setProperty } from '../../commands/set-property-command'
 import {
   fallbackEmptyValue,
@@ -30,7 +30,7 @@ import {
 } from '../../gap-utils'
 import type { CanvasStrategyFactory } from '../canvas-strategies'
 import { onlyFitWhenDraggingThisControl } from '../canvas-strategies'
-import type { InteractionCanvasState } from '../canvas-strategy-types'
+import type { ControlWithProps, InteractionCanvasState } from '../canvas-strategy-types'
 import {
   controlWithProps,
   emptyStrategyApplicationResult,
@@ -40,7 +40,10 @@ import {
 import type { InteractionSession } from '../interaction-state'
 import { colorTheme } from '../../../../uuiui'
 import { activeFrameTargetPath, setActiveFrames } from '../../commands/set-active-frames-command'
+import type { GridGapControlProps } from '../../controls/select-mode/grid-gap-control'
 import { GridGapControl } from '../../controls/select-mode/grid-gap-control'
+import type { GridControlsProps } from '../../controls/grid-controls'
+import { controlsForGridPlaceholders } from '../../controls/grid-controls'
 
 const SetGridGapStrategyId = 'SET_GRID_GAP_STRATEGY'
 
@@ -101,7 +104,7 @@ export const setGridGapStrategy: CanvasStrategyFactory = (
     column: offsetMeasurementByDelta(gridGap.column, dragDelta.x, adjustPrecision),
   }
 
-  const resizeControl = controlWithProps({
+  const gridGapControl = controlWithProps({
     control: GridGapControl,
     props: {
       selectedElement: selectedElement,
@@ -116,21 +119,31 @@ export const setGridGapStrategy: CanvasStrategyFactory = (
 
   const maybeIndicatorProps = gridGapValueIndicatorProps(interactionSession, gridGap)
 
-  const controlsToRender = optionalMap(
-    (props) => [
-      resizeControl,
+  const controlsToRender: Array<
+    | ControlWithProps<FloatingIndicatorProps>
+    | ControlWithProps<GridControlsProps>
+    | ControlWithProps<GridGapControlProps>
+  > = [gridGapControl]
+
+  // show indicator if needed
+  if (maybeIndicatorProps != null) {
+    controlsToRender.push(
       controlWithProps({
         control: FloatingIndicator,
         props: {
-          ...props,
-          color: colorTheme.brandNeonPink.value,
+          ...maybeIndicatorProps,
+          color: colorTheme.brandNeonOrange.value,
         },
         key: 'padding-value-indicator-control',
         show: 'visible-except-when-other-strategy-is-active',
       }),
-    ],
-    maybeIndicatorProps,
-  ) ?? [resizeControl]
+    )
+  }
+
+  // when the drag is ongoing, keep showing the grid cells
+  if (isDragOngoing(interactionSession)) {
+    controlsToRender.push(controlsForGridPlaceholders(selectedElement))
+  }
 
   return {
     id: SetGridGapStrategyId,
@@ -158,30 +171,33 @@ export const setGridGapStrategy: CanvasStrategyFactory = (
         axis === 'row' ? updatedGridGapMeasurement.row : updatedGridGapMeasurement.column
 
       if (shouldTearOffGapByAxis) {
-        return strategyApplicationResult([
-          deleteProperties('always', selectedElement, [axisStyleProp]),
-        ])
+        return strategyApplicationResult(
+          [deleteProperties('always', selectedElement, [axisStyleProp])],
+          selectedElements,
+        )
       }
 
-      return strategyApplicationResult([
-        setProperty(
-          'always',
-          selectedElement,
-          axisStyleProp,
-          printCSSNumber(fallbackEmptyValue(gridGapMeasurement), null),
-        ),
-        setCursorCommand(cursorFromAxis(axis)),
-        setElementsToRerenderCommand([...selectedElements, ...children.map((c) => c.elementPath)]),
-        setActiveFrames([
-          {
-            action: 'set-gap',
-            target: activeFrameTargetPath(selectedElement),
-            source: zeroRectIfNullOrInfinity(
-              MetadataUtils.getFrameInCanvasCoords(selectedElement, canvasState.startingMetadata),
-            ),
-          },
-        ]),
-      ])
+      return strategyApplicationResult(
+        [
+          setProperty(
+            'always',
+            selectedElement,
+            axisStyleProp,
+            printCSSNumber(fallbackEmptyValue(gridGapMeasurement), null),
+          ),
+          setCursorCommand(cursorFromAxis(axis)),
+          setActiveFrames([
+            {
+              action: 'set-gap',
+              target: activeFrameTargetPath(selectedElement),
+              source: zeroRectIfNullOrInfinity(
+                MetadataUtils.getFrameInCanvasCoords(selectedElement, canvasState.startingMetadata),
+              ),
+            },
+          ]),
+        ],
+        selectedElements,
+      )
     },
   }
 }

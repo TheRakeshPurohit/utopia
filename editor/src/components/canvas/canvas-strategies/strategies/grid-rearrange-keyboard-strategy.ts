@@ -2,7 +2,7 @@ import { MetadataUtils } from '../../../../core/model/element-metadata-utils'
 import * as EP from '../../../../core/shared/element-path'
 import type { GridPositionValue } from '../../../../core/shared/element-template'
 import { gridPositionValue } from '../../../../core/shared/element-template'
-import { GridControls, GridControlsKey } from '../../controls/grid-controls'
+import { controlsForGridPlaceholders } from '../../controls/grid-controls'
 import type {
   CanvasStrategy,
   CustomStrategyState,
@@ -14,7 +14,8 @@ import {
   strategyApplicationResult,
 } from '../canvas-strategy-types'
 import type { InteractionSession } from '../interaction-state'
-import { getGridCellBoundsFromCanvas, setGridPropsCommands } from './grid-helpers'
+import { setGridPropsCommands } from './grid-helpers'
+import { getGridChildCellCoordBoundsFromCanvas } from './grid-cell-bounds'
 import { accumulatePresses } from './shared-keyboard-strategy-helpers'
 
 export function gridRearrangeResizeKeyboardStrategy(
@@ -53,11 +54,7 @@ export function gridRearrangeResizeKeyboardStrategy(
   }
   const gridTemplate = grid.specialSizeMeasurements.containerGridProperties
 
-  const initialCellBounds = getGridCellBoundsFromCanvas(
-    cell,
-    canvasState.scale,
-    canvasState.canvasOffset,
-  )
+  const initialCellBounds = getGridChildCellCoordBoundsFromCanvas(cell, grid)
   if (initialCellBounds == null) {
     return null
   }
@@ -77,15 +74,7 @@ export function gridRearrangeResizeKeyboardStrategy(
       category: 'modalities',
       type: 'reorder-large',
     },
-    controlsToRender: [
-      {
-        control: GridControls,
-        props: { targets: [parentGridPath] },
-        key: GridControlsKey(parentGridPath),
-        show: 'always-visible',
-        priority: 'bottom',
-      },
-    ],
+    controlsToRender: [controlsForGridPlaceholders(parentGridPath)],
     fitness: fitness(interactionSession),
     apply: () => {
       if (interactionSession == null || interactionSession.interactionData.type !== 'KEYBOARD') {
@@ -144,6 +133,7 @@ export function gridRearrangeResizeKeyboardStrategy(
           gridRowStart,
           gridRowEnd,
         }),
+        [parentGridPath],
       )
     },
   }

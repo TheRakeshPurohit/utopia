@@ -88,7 +88,7 @@ export const EmptyEditorStateForKeysOnly: EditorState = {
       reparentedToPaths: [],
       dragToMoveIndicatorFlags: null as any,
       parentOutlineHighlight: null,
-      gridControls: null,
+      gridControlData: null,
     },
   },
   inspector: {
@@ -123,10 +123,6 @@ export const EmptyEditorStateForKeysOnly: EditorState = {
   topmenu: {
     formulaBarMode: 'content',
     formulaBarFocusCounter: 0,
-  },
-  preview: {
-    visible: false,
-    connected: false,
   },
   home: {
     visible: false,

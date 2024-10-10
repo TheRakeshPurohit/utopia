@@ -1,12 +1,25 @@
+import type { NodeModules, ProjectContentTreeRoot } from 'utopia-shared/src/types'
+import type { BuiltInDependencies } from '../../../../core/es-modules/package-manager/built-in-dependencies-list'
 import { MetadataUtils } from '../../../../core/model/element-metadata-utils'
 import { mapDropNulls } from '../../../../core/shared/array-utils'
 import * as EP from '../../../../core/shared/element-path'
-import * as PP from '../../../../core/shared/property-path'
+import type { ElementPathTrees } from '../../../../core/shared/element-path-tree'
+import {
+  type ElementInstanceMetadata,
+  type ElementInstanceMetadataMap,
+} from '../../../../core/shared/element-template'
+import type { CanvasRectangle } from '../../../../core/shared/math-utils'
+import { isInfinityRectangle } from '../../../../core/shared/math-utils'
 import type { ElementPath } from '../../../../core/shared/project-file-types'
+import * as PP from '../../../../core/shared/property-path'
+import type { AllElementProps } from '../../../editor/store/editor-state'
+import type { InsertionPath } from '../../../editor/store/insertion-path'
 import { CSSCursor } from '../../canvas-types'
 import { setCursorCommand } from '../../commands/set-cursor-command'
 import { propertyToSet, updateBulkProperties } from '../../commands/set-property-command'
+import { showGridControls } from '../../commands/show-grid-controls-command'
 import { updateSelectedViews } from '../../commands/update-selected-views-command'
+import { controlsForGridPlaceholders } from '../../controls/grid-controls'
 import { ParentBounds } from '../../controls/parent-bounds'
 import { ParentOutlines } from '../../controls/parent-outlines'
 import { ZeroSizedElementControls } from '../../controls/zero-sized-element-controls'
@@ -15,7 +28,6 @@ import type {
   CanvasStrategy,
   ControlWithProps,
   CustomStrategyState,
-  GridCustomStrategyState,
   InteractionCanvasState,
 } from '../canvas-strategy-types'
 import {
@@ -27,28 +39,12 @@ import {
 import type { DragInteractionData, InteractionSession, UpdatedPathMap } from '../interaction-state'
 import { honoursPropsPosition, shouldKeepMovingDraggedGroupChildren } from './absolute-utils'
 import { replaceFragmentLikePathsWithTheirChildrenRecursive } from './fragment-like-helpers'
+import { getMetadataWithGridCellBounds, runGridRearrangeMove } from './grid-helpers'
 import { ifAllowedToReparent, isAllowedToReparent } from './reparent-helpers/reparent-helpers'
+import { removeAbsolutePositioningProps } from './reparent-helpers/reparent-property-changes'
 import type { ReparentTarget } from './reparent-helpers/reparent-strategy-helpers'
 import { getReparentOutcome, pathToReparent } from './reparent-utils'
 import { flattenSelection } from './shared-move-strategies-helpers'
-import type { CanvasRectangle, CanvasVector } from '../../../../core/shared/math-utils'
-import { canvasVector, isInfinityRectangle, offsetPoint } from '../../../../core/shared/math-utils'
-import { showGridControls } from '../../commands/show-grid-controls-command'
-import type { GridCellCoordinates } from '../../controls/grid-controls'
-import { GridControls } from '../../controls/grid-controls'
-import {
-  gridPositionValue,
-  type ElementInstanceMetadataMap,
-} from '../../../../core/shared/element-template'
-import type { ElementPathTrees } from '../../../../core/shared/element-path-tree'
-import type { AllElementProps } from '../../../editor/store/editor-state'
-import type { BuiltInDependencies } from '../../../../core/es-modules/package-manager/built-in-dependencies-list'
-import type { NodeModules, ProjectContentTreeRoot } from 'utopia-shared/src/types'
-import type { InsertionPath } from '../../../editor/store/insertion-path'
-import { removeAbsolutePositioningProps } from './reparent-helpers/reparent-property-changes'
-import { canvasPointToWindowPoint } from '../../dom-lookup'
-import type { TargetGridCellData } from './grid-helpers'
-import { getTargetCell, setGridPropsCommands } from './grid-helpers'
 
 export function gridReparentStrategy(
   reparentTarget: ReparentTarget,
@@ -108,6 +104,7 @@ export function gridReparentStrategy(
       apply: applyGridReparent(
         canvasState,
         dragInteractionData,
+        interactionSession,
         customStrategyState,
         reparentTarget,
         filteredSelectedElements,
@@ -137,47 +134,21 @@ export function controlsForGridReparent(reparentTarget: ReparentTarget): Control
       key: 'zero-size-control',
       show: 'visible-only-while-active',
     }),
-    {
-      control: GridControls,
-      props: { targets: [reparentTarget.newParent.intendedParentPath] },
-      key: `draw-into-grid-strategy-controls`,
-      show: 'always-visible',
-      priority: 'bottom',
-    },
+    controlsForGridPlaceholders(reparentTarget.newParent.intendedParentPath),
   ]
-}
-
-function getTargetGridCellUnderCursor(
-  interactionData: DragInteractionData,
-  canvasScale: number,
-  canvasOffset: CanvasVector,
-  customState: GridCustomStrategyState,
-): TargetGridCellData | null {
-  const mouseWindowPoint = canvasPointToWindowPoint(
-    offsetPoint(interactionData.dragStart, interactionData.drag ?? canvasVector({ x: 0, y: 0 })),
-    canvasScale,
-    canvasOffset,
-  )
-
-  const targetCellUnderMouse = getTargetCell(
-    customState.targetCellData?.gridCellCoordinates ?? null,
-    false,
-    mouseWindowPoint,
-  )
-
-  return targetCellUnderMouse
 }
 
 export function applyGridReparent(
   canvasState: InteractionCanvasState,
   interactionData: DragInteractionData,
+  interactionSession: InteractionSession,
   customStrategyState: CustomStrategyState,
   reparentTarget: ReparentTarget,
   selectedElements: ElementPath[],
   gridFrame: CanvasRectangle,
 ) {
   return () => {
-    if (interactionData.drag == null) {
+    if (interactionData.drag == null || selectedElements.length === 0) {
       return emptyStrategyApplicationResult
     }
 
@@ -189,8 +160,20 @@ export function applyGridReparent(
       selectedElements,
       newParent.intendedParentPath,
       () => {
-        if (interactionData.drag == null) {
+        if (interactionData.drag == null || selectedElements.length === 0) {
           return emptyStrategyApplicationResult
+        }
+
+        const { metadata: grid, customStrategyState: updatedCustomState } =
+          getMetadataWithGridCellBounds(
+            newParent.intendedParentPath,
+            canvasState.startingMetadata,
+            interactionSession.latestMetadata,
+            customStrategyState,
+          )
+
+        if (grid == null) {
+          return strategyApplicationResult([], [newParent.intendedParentPath])
         }
 
         const allowedToReparent = selectedElements.every((selectedElement) => {
@@ -206,17 +189,6 @@ export function applyGridReparent(
           return emptyStrategyApplicationResult
         }
 
-        const targetCellData =
-          getTargetGridCellUnderCursor(
-            interactionData,
-            canvasState.scale,
-            canvasState.canvasOffset,
-            customStrategyState.grid,
-          ) ?? customStrategyState.grid.targetCellData
-
-        if (targetCellData == null) {
-          return emptyStrategyApplicationResult
-        }
         const outcomes = mapDropNulls(
           (selectedElement) =>
             gridReparentCommands(
@@ -228,7 +200,8 @@ export function applyGridReparent(
               nodeModules,
               selectedElement,
               newParent,
-              targetCellData.gridCellCoordinates,
+              interactionData,
+              grid,
             ),
           selectedElements,
         )
@@ -255,7 +228,14 @@ export function applyGridReparent(
           ...newPaths,
           ...newPaths.map(EP.parentPath),
           ...selectedElements.map(EP.parentPath),
+          newParent.intendedParentPath,
         ])
+
+        const baseCustomState = updatedCustomState ?? customStrategyState
+        const customStrategyStatePatch = {
+          ...baseCustomState,
+          elementsToRerender: elementsToRerender,
+        }
 
         return strategyApplicationResult(
           [
@@ -263,48 +243,13 @@ export function applyGridReparent(
             gridContainerCommands,
             updateSelectedViews('always', newPaths),
             setCursorCommand(CSSCursor.Reparent),
-            showGridControls('mid-interaction', reparentTarget.newParent.intendedParentPath),
           ],
-          {
-            elementsToRerender: elementsToRerender,
-            grid: {
-              ...customStrategyState.grid,
-              targetCellData: targetCellData,
-            },
-          },
+          elementsToRerender,
+          customStrategyStatePatch,
         )
       },
     )
   }
-}
-
-function getGridPositioningCommands(
-  jsxMetadata: ElementInstanceMetadataMap,
-  hoveredCoordinates: GridCellCoordinates,
-  {
-    parentPath,
-    target,
-  }: {
-    parentPath: ElementPath
-    target: ElementPath
-  },
-) {
-  const containerMetadata = MetadataUtils.findElementByElementPath(jsxMetadata, parentPath)
-  if (containerMetadata == null) {
-    return null
-  }
-  const { column, row } = hoveredCoordinates
-
-  const gridTemplate = containerMetadata.specialSizeMeasurements.containerGridProperties
-
-  const gridPropsCommands = setGridPropsCommands(target, gridTemplate, {
-    gridColumnStart: gridPositionValue(column),
-    gridColumnEnd: gridPositionValue(column),
-    gridRowEnd: gridPositionValue(row),
-    gridRowStart: gridPositionValue(row),
-  })
-
-  return gridPropsCommands
 }
 
 function gridReparentCommands(
@@ -316,7 +261,8 @@ function gridReparentCommands(
   nodeModules: NodeModules,
   target: ElementPath,
   newParent: InsertionPath,
-  hoveredCoordinates: GridCellCoordinates,
+  interactionData: DragInteractionData,
+  grid: ElementInstanceMetadata,
 ) {
   const reparentResult = getReparentOutcome(
     jsxMetadata,
@@ -334,11 +280,7 @@ function gridReparentCommands(
   if (reparentResult == null) {
     return null
   }
-
-  const gridPropsCommands = getGridPositioningCommands(jsxMetadata, hoveredCoordinates, {
-    parentPath: newParent.intendedParentPath,
-    target: target,
-  })
+  const gridPropsCommands = runGridRearrangeMove(target, target, jsxMetadata, interactionData, grid)
 
   if (gridPropsCommands == null) {
     return null

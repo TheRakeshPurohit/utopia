@@ -34,7 +34,12 @@ import { firstLetterIsLowerCase } from './string-utils'
 import { intrinsicHTMLElementNamesAsStrings } from './dom-utils'
 import type { MapLike } from 'typescript'
 import { forceNotNull } from './optional-utils'
-import type { FlexAlignment, FlexJustifyContent } from '../../components/inspector/inspector-common'
+import type {
+  AlignContent,
+  FlexAlignment,
+  FlexJustifyContent,
+  SelfAlignment,
+} from '../../components/inspector/inspector-common'
 import { allComments } from './utopia-flags'
 import type { Optic } from './optics/optics'
 import { fromField } from './optics/optic-creators'
@@ -2810,7 +2815,10 @@ export interface SpecialSizeMeasurements {
   gap: number | null
   flexDirection: FlexDirection | null
   justifyContent: FlexJustifyContent | null
+  alignContent: AlignContent | null
   alignItems: FlexAlignment | null
+  alignSelf: SelfAlignment | null
+  justifySelf: SelfAlignment | null
   htmlElementName: string
   renderedChildrenCount: number
   globalContentBoxForChildren: MaybeInfinityCanvasRectangle | null
@@ -2830,6 +2838,7 @@ export interface SpecialSizeMeasurements {
   elementGridPropertiesFromProps: GridElementProperties
   rowGap: number | null
   columnGap: number | null
+  gridCellGlobalFrames: Array<Array<CanvasRectangle>> | null
 }
 
 export function specialSizeMeasurements(
@@ -2859,6 +2868,7 @@ export function specialSizeMeasurements(
   gap: number | null,
   flexDirection: FlexDirection | null,
   justifyContent: FlexJustifyContent | null,
+  alignContent: AlignContent | null,
   alignItems: FlexAlignment | null,
   htmlElementName: string,
   renderedChildrenCount: number,
@@ -2880,6 +2890,9 @@ export function specialSizeMeasurements(
   elementGridPropertiesFromProps: GridElementProperties,
   rowGap: number | null,
   columnGap: number | null,
+  gridCellGlobalFrames: Array<Array<CanvasRectangle>> | null,
+  justifySelf: SelfAlignment | null,
+  alignSelf: SelfAlignment | null,
 ): SpecialSizeMeasurements {
   return {
     offset,
@@ -2909,6 +2922,7 @@ export function specialSizeMeasurements(
     gap,
     flexDirection,
     justifyContent,
+    alignContent,
     alignItems,
     htmlElementName,
     renderedChildrenCount,
@@ -2929,6 +2943,9 @@ export function specialSizeMeasurements(
     elementGridPropertiesFromProps,
     rowGap,
     columnGap,
+    gridCellGlobalFrames,
+    justifySelf,
+    alignSelf,
   }
 }
 
@@ -2959,6 +2976,7 @@ export const emptySpecialSizeMeasurements = specialSizeMeasurements(
   0,
   sides(undefined, undefined, undefined, undefined),
   false,
+  null,
   null,
   null,
   null,
@@ -3003,6 +3021,9 @@ export const emptySpecialSizeMeasurements = specialSizeMeasurements(
     gridRowStart: null,
     gridRowEnd: null,
   },
+  null,
+  null,
+  null,
   null,
   null,
 )

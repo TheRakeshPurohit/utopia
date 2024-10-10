@@ -58,7 +58,7 @@ type prettyLabel =
   | 'Horizontal'
   | 'Vertical'
 
-const PrettyLabel: { [K in uglyLabel]: prettyLabel } = {
+export const PrettyLabel: { [K in uglyLabel]: prettyLabel } = {
   left: 'Left',
   center: 'Center',
   right: 'Right',
@@ -71,7 +71,7 @@ const PrettyLabel: { [K in uglyLabel]: prettyLabel } = {
   vertical: 'Vertical',
 }
 
-interface FlexFieldControlProps<T> {
+export interface FlexFieldControlProps<T> {
   value: T
   controlStatus: ControlStatus
   controlStyles: ControlStyles
@@ -328,6 +328,8 @@ export const FlexGapControl = React.memo(() => {
           testId='flex.container.gap'
           key='flex.container.gap'
           value={value}
+          minimum={0}
+          clampOnSubmitValue={true}
           onSubmitValue={wrappedOnSubmitValue}
           onTransientSubmitValue={wrappedOnTransientSubmitValue}
           onForcedSubmitValue={wrappedOnSubmitValue}

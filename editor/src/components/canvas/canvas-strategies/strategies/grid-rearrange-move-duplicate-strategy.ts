@@ -4,10 +4,10 @@ import * as EP from '../../../../core/shared/element-path'
 import { CSSCursor } from '../../../../uuiui-deps'
 import { duplicateElement } from '../../commands/duplicate-element-command'
 import { setCursorCommand } from '../../commands/set-cursor-command'
-import { setElementsToRerenderCommand } from '../../commands/set-elements-to-rerender-command'
+
 import { updateHighlightedViews } from '../../commands/update-highlighted-views-command'
 import { updateSelectedViews } from '../../commands/update-selected-views-command'
-import { GridControls, GridControlsKey } from '../../controls/grid-controls'
+import { controlsForGridPlaceholders } from '../../controls/grid-controls'
 import type { CanvasStrategyFactory } from '../canvas-strategies'
 import { onlyFitWhenDraggingThisControl } from '../canvas-strategies'
 import type { CustomStrategyState, InteractionCanvasState } from '../canvas-strategy-types'
@@ -49,15 +49,7 @@ export const gridRearrangeMoveDuplicateStrategy: CanvasStrategyFactory = (
       category: 'tools',
       type: 'pointer',
     },
-    controlsToRender: [
-      {
-        control: GridControls,
-        props: { targets: [EP.parentPath(selectedElement)] },
-        key: GridControlsKey(EP.parentPath(selectedElement)),
-        show: 'always-visible',
-        priority: 'bottom',
-      },
-    ],
+    controlsToRender: [controlsForGridPlaceholders(EP.parentPath(selectedElement))],
     fitness: onlyFitWhenDraggingThisControl(interactionSession, 'GRID_CELL_HANDLE', 3),
     apply: () => {
       if (
@@ -80,21 +72,20 @@ export const gridRearrangeMoveDuplicateStrategy: CanvasStrategyFactory = (
 
       const targetElement = EP.appendToPath(EP.parentPath(selectedElement), newUid)
 
-      const {
-        commands: moveCommands,
-        targetCell: targetGridCellData,
-        draggingFromCell,
-        originalRootCell,
-        targetRootCell,
-      } = runGridRearrangeMove(
+      const grid = MetadataUtils.findElementByElementPath(
+        canvasState.startingMetadata,
+        EP.parentPath(selectedElement),
+      )
+      if (grid == null) {
+        return emptyStrategyApplicationResult
+      }
+
+      const moveCommands = runGridRearrangeMove(
         targetElement,
         selectedElement,
         canvasState.startingMetadata,
         interactionSession.interactionData,
-        canvasState.scale,
-        canvasState.canvasOffset,
-        customState.grid,
-        true,
+        grid,
       )
       if (moveCommands.length === 0) {
         return emptyStrategyApplicationResult
@@ -104,18 +95,12 @@ export const gridRearrangeMoveDuplicateStrategy: CanvasStrategyFactory = (
         [
           duplicateElement('always', selectedElement, newUid),
           ...moveCommands,
-          setElementsToRerenderCommand([...selectedElements, targetElement]),
           updateSelectedViews('always', [targetElement]),
           updateHighlightedViews('always', [targetElement]),
           setCursorCommand(CSSCursor.Duplicate),
         ],
+        [...selectedElements, targetElement],
         {
-          grid: {
-            targetCellData: targetGridCellData,
-            draggingFromCell: draggingFromCell,
-            originalRootCell: originalRootCell,
-            currentRootCell: targetRootCell,
-          },
           duplicatedElementNewUids: duplicatedElementNewUids,
         },
       )

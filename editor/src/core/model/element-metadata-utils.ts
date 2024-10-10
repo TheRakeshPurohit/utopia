@@ -46,6 +46,7 @@ import type {
   ConditionValue,
   JSXElementLike,
   JSPropertyAccess,
+  SpecialSizeMeasurements,
 } from '../shared/element-template'
 import {
   getJSXElementNameLastPart,
@@ -138,7 +139,15 @@ import {
 import type { ProjectContentTreeRoot } from '../../components/assets'
 import { memoize } from '../shared/memoize'
 import type { ElementPathTree, ElementPathTrees } from '../shared/element-path-tree'
-import { buildTree, getSubTree, getCanvasRoots, elementPathTree } from '../shared/element-path-tree'
+import {
+  buildTree,
+  getSubTree,
+  getCanvasRoots,
+  elementPathTree,
+  getElementPathTreeChildren,
+  forEachElementPathTreeChild,
+  printTree,
+} from '../shared/element-path-tree'
 import type { PropertyControlsInfo } from '../../components/custom-code/code-file'
 import { findUnderlyingTargetComponentImplementationFromImportInfo } from '../../components/custom-code/code-file'
 import type {
@@ -323,7 +332,6 @@ export const MetadataUtils = {
     if (target == null) {
       return []
     }
-
     const parentPath = EP.parentPath(target)
     const siblingPathsOrNull = EP.isRootElementOfInstance(target)
       ? MetadataUtils.getRootViewPathsOrdered(metadata, pathTree, parentPath)
@@ -382,6 +390,22 @@ export const MetadataUtils = {
       parent.specialSizeMeasurements.containerGridProperties.gridTemplateColumns != null &&
       parent.specialSizeMeasurements.containerGridProperties.gridTemplateRows != null &&
       MetadataUtils.isGridLayoutedContainer(parent)
+    )
+  },
+  isGridCellWithPositioning(metadata: ElementInstanceMetadataMap, path: ElementPath): boolean {
+    const element = MetadataUtils.findElementByElementPath(metadata, path)
+    return (
+      MetadataUtils.isGridCell(metadata, path) &&
+      element != null &&
+      !MetadataUtils.hasNoGridCellPositioning(element.specialSizeMeasurements)
+    )
+  },
+  hasNoGridCellPositioning(specialSizeMeasurements: SpecialSizeMeasurements): boolean {
+    return (
+      specialSizeMeasurements.elementGridPropertiesFromProps.gridColumnStart == null &&
+      specialSizeMeasurements.elementGridPropertiesFromProps.gridColumnEnd == null &&
+      specialSizeMeasurements.elementGridPropertiesFromProps.gridRowStart == null &&
+      specialSizeMeasurements.elementGridPropertiesFromProps.gridRowEnd == null
     )
   },
   isComponentInstanceFromMetadata(
@@ -606,6 +630,24 @@ export const MetadataUtils = {
       MetadataUtils.getFlexDirection(instance),
     )
   },
+  isFlexOrGridChild: function (jsxMetadata: ElementInstanceMetadataMap, path: ElementPath) {
+    return (
+      MetadataUtils.isFlexLayoutedContainer(
+        MetadataUtils.findElementByElementPath(jsxMetadata, EP.parentPath(path)),
+      ) || MetadataUtils.isGridCell(jsxMetadata, path)
+    )
+  },
+  getRelativeAlignJustify: function (
+    jsxMetadata: ElementInstanceMetadataMap,
+    path: ElementPath,
+  ): { align: 'alignSelf' | 'justifySelf'; justify: 'alignSelf' | 'justifySelf' } {
+    const direction = MetadataUtils.getSimpleFlexDirection(
+      MetadataUtils.findElementByElementPath(jsxMetadata, EP.parentPath(path)),
+    )
+    const align = direction.direction === 'horizontal' ? 'alignSelf' : 'justifySelf'
+    const justify = direction.direction === 'horizontal' ? 'justifySelf' : 'alignSelf'
+    return { align, justify }
+  },
   flexDirectionToSimpleFlexDirection: function (flexDirection: FlexDirection): {
     direction: Direction
     forwardOrReverse: ForwardOrReverse
@@ -724,7 +766,7 @@ export const MetadataUtils = {
     if (subTree == null) {
       return []
     } else {
-      return subTree.children
+      return getElementPathTreeChildren(subTree)
         .map((child) => child.path)
         .filter((path) => !EP.isRootElementOfInstance(path))
     }
@@ -845,7 +887,7 @@ export const MetadataUtils = {
       let result: Array<ElementPath> = []
       function recurseElement(tree: ElementPathTree): void {
         result.push(tree.path)
-        fastForEach(Object.values(tree.children), (childTree) => {
+        forEachElementPathTreeChild(tree, (childTree) => {
           recurseElement(childTree)
         })
       }
@@ -878,7 +920,7 @@ export const MetadataUtils = {
       if (tree != null) {
         result.push(tree.path)
 
-        fastForEach(Object.values(tree.children), (childTree) => {
+        forEachElementPathTreeChild(tree, (childTree) => {
           recurseElement(childTree)
         })
       }
@@ -1375,7 +1417,7 @@ export const MetadataUtils = {
 
           let unfurledComponents: Array<ElementPathTree> = []
 
-          fastForEach(Object.values(subTree.children), (child) => {
+          forEachElementPathTreeChild(subTree, (child) => {
             if (EP.isRootElementOfInstance(child.path)) {
               unfurledComponents.push(child)
             } else {
@@ -2881,4 +2923,14 @@ export function getZIndexOrderedViewsWithoutDirectChildren(
     }
   })
   return filteredTargets
+}
+
+export function countSetProperties(
+  targets: PropertyPath[],
+  elementProps: PropsOrJSXAttributes,
+): number {
+  return targets.filter((curr) => {
+    const attr = getSimpleAttributeAtPath(elementProps, curr)
+    return isRight(attr) && attr.value != null
+  }, 0).length
 }

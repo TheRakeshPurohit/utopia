@@ -42,8 +42,11 @@ import {
   getAttributesComingFromStyleSheets,
 } from './dom-walker'
 import type { UiJsxCanvasContextData } from './ui-jsx-canvas'
+import type { LimitExecutionCountReset } from '../../core/shared/execution-count'
+import { limitExecutionCount } from '../../core/shared/execution-count'
+import { IS_TEST_ENVIRONMENT } from '../../common/env-vars'
 
-export function runDomSampler(options: {
+export function runDomSamplerUnchecked(options: {
   elementsToFocusOn: ElementsToRerender
   domWalkerAdditionalElementsToFocusOn: Array<ElementPath>
   scale: number
@@ -67,6 +70,15 @@ export function runDomSampler(options: {
   }
 
   const validPaths = getValidPathsFromCanvasContainer(canvasRootContainer)
+  // Only perform this validation while in a test environment.
+  if (IS_TEST_ENVIRONMENT) {
+    const uniqueValidPaths = new Set(validPaths.map(EP.toString))
+    if (uniqueValidPaths.size !== validPaths.length) {
+      throw new Error(
+        `Duplicate paths in validPaths: ${JSON.stringify(validPaths.map(EP.toString), null, 2)}`,
+      )
+    }
+  }
 
   const spyPaths = Object.keys(options.spyCollector.current.spyValues.metadata)
   if (spyPaths.length === 0 && validPaths.length > 0) {
@@ -82,7 +94,7 @@ export function runDomSampler(options: {
   let result: { metadata: ElementInstanceMetadataMap; tree: ElementPathTrees }
   if (elementsToCollect == 'rerender-all-elements') {
     result = collectMetadataForPaths({
-      metadataToUpdate_MUTATE: {},
+      metadataToUpdate_MUTATE: { ...options.metadataToUpdate }, // shallow cloning this object so we can mutate it
       canvasRootContainer: canvasRootContainer,
       pathsToCollect: validPaths,
       validPaths: validPaths,
@@ -91,6 +103,7 @@ export function runDomSampler(options: {
       spyCollector: options.spyCollector,
       spyPaths: spyPaths,
       elementCanvasRectangleCache: elementCanvasRectangleCache,
+      checkExistingMetadata: 'check-existing',
     })
   } else {
     result = collectMetadataForPaths({
@@ -108,11 +121,31 @@ export function runDomSampler(options: {
       spyCollector: options.spyCollector,
       spyPaths: spyPaths,
       elementCanvasRectangleCache: elementCanvasRectangleCache,
+      checkExistingMetadata: 'keep-existing',
     })
   }
 
   return result
 }
+
+let domSamplerExecutionLimitResets: Array<LimitExecutionCountReset> = []
+
+export function resetDomSamplerExecutionCounts() {
+  for (const reset of domSamplerExecutionLimitResets) {
+    reset()
+  }
+}
+
+const wrappedRunDomSamplerRegular = limitExecutionCount(
+  { maximumExecutionCount: 1, addToResetArray: domSamplerExecutionLimitResets },
+  runDomSamplerUnchecked,
+)
+const wrappedRunDomSamplerGroups = limitExecutionCount(
+  { maximumExecutionCount: 1, addToResetArray: domSamplerExecutionLimitResets },
+  runDomSamplerUnchecked,
+)
+export const runDomSamplerRegular = wrappedRunDomSamplerRegular.wrappedFunction
+export const runDomSamplerGroups = wrappedRunDomSamplerGroups.wrappedFunction
 
 function collectMetadataForPaths({
   canvasRootContainer,
@@ -124,6 +157,7 @@ function collectMetadataForPaths({
   spyCollector,
   spyPaths,
   elementCanvasRectangleCache,
+  checkExistingMetadata,
 }: {
   canvasRootContainer: HTMLElement
   pathsToCollect: Array<ElementPath>
@@ -134,6 +168,7 @@ function collectMetadataForPaths({
   spyCollector: UiJsxCanvasContextData
   spyPaths: Array<string>
   elementCanvasRectangleCache: ElementCanvasRectangleCache
+  checkExistingMetadata: 'check-existing' | 'keep-existing'
 }): {
   metadata: ElementInstanceMetadataMap
   tree: ElementPathTrees
@@ -146,15 +181,23 @@ function collectMetadataForPaths({
     elementCanvasRectangleCache,
   )
 
-  pathsToCollect.forEach((staticPath) => {
-    const dynamicPaths = spyPaths.filter((spyPath) =>
+  const dynamicPathsToCollect = pathsToCollect.flatMap((staticPath) => {
+    return spyPaths.filter((spyPath) =>
       EP.pathsEqual(EP.makeLastPartOfPathStatic(EP.fromString(spyPath)), staticPath),
     )
+  })
 
-    dynamicPaths.forEach((pathString) => {
-      const path = EP.fromString(pathString)
+  let domMetadataCollected: { [key: string]: DomElementMetadata | null } = {}
+
+  if (checkExistingMetadata === 'check-existing') {
+    // delete all metadata which should be collected now and those which are not in the dom anymore
+    Object.keys(metadataToUpdate_MUTATE).forEach((p) => {
+      if (dynamicPathsToCollect.includes(p)) {
+        delete metadataToUpdate_MUTATE[p]
+      }
+
       const domMetadata = collectMetadataForElementPath(
-        path,
+        EP.fromString(p),
         validPaths,
         selectedViews,
         scale,
@@ -162,36 +205,56 @@ function collectMetadataForPaths({
         elementCanvasRectangleCache,
       )
 
-      const spyMetadata = spyCollector.current.spyValues.metadata[EP.toString(path)]
-      if (spyMetadata == null) {
-        // if the element is missing from the spyMetadata, we bail out. this is the same behavior as the old reconstructJSXMetadata implementation
-        return
-      }
-
       if (domMetadata == null) {
-        metadataToUpdate_MUTATE[EP.toString(path)] = {
-          ...spyMetadata,
-        }
-        return
+        delete metadataToUpdate_MUTATE[p]
       }
-
-      let jsxElement = alternativeEither(spyMetadata.element, domMetadata.element)
-
-      // TODO avoid temporary object creation
-      const elementInstanceMetadata: ElementInstanceMetadata = {
-        ...domMetadata,
-        element: jsxElement,
-        elementPath: spyMetadata.elementPath,
-        componentInstance: spyMetadata.componentInstance,
-        isEmotionOrStyledComponent: spyMetadata.isEmotionOrStyledComponent,
-        label: spyMetadata.label,
-        importInfo: spyMetadata.importInfo,
-        assignedToProp: spyMetadata.assignedToProp,
-        conditionValue: spyMetadata.conditionValue,
-        earlyReturn: spyMetadata.earlyReturn,
-      }
-      metadataToUpdate_MUTATE[EP.toString(spyMetadata.elementPath)] = elementInstanceMetadata
+      domMetadataCollected[p] = domMetadata
     })
+  }
+
+  dynamicPathsToCollect.forEach((pathString) => {
+    const path = EP.fromString(pathString)
+    const domMetadata =
+      pathString in domMetadataCollected
+        ? domMetadataCollected[pathString]
+        : collectMetadataForElementPath(
+            path,
+            validPaths,
+            selectedViews,
+            scale,
+            containerRect,
+            elementCanvasRectangleCache,
+          )
+
+    const spyMetadata = spyCollector.current.spyValues.metadata[EP.toString(path)]
+    if (spyMetadata == null) {
+      // if the element is missing from the spyMetadata, we bail out. this is the same behavior as the old reconstructJSXMetadata implementation
+      return
+    }
+
+    if (domMetadata == null) {
+      metadataToUpdate_MUTATE[EP.toString(path)] = {
+        ...spyMetadata,
+      }
+      return
+    }
+
+    let jsxElement = alternativeEither(spyMetadata.element, domMetadata.element)
+
+    // TODO avoid temporary object creation
+    const elementInstanceMetadata: ElementInstanceMetadata = {
+      ...domMetadata,
+      element: jsxElement,
+      elementPath: spyMetadata.elementPath,
+      componentInstance: spyMetadata.componentInstance,
+      isEmotionOrStyledComponent: spyMetadata.isEmotionOrStyledComponent,
+      label: spyMetadata.label,
+      importInfo: spyMetadata.importInfo,
+      assignedToProp: spyMetadata.assignedToProp,
+      conditionValue: spyMetadata.conditionValue,
+      earlyReturn: spyMetadata.earlyReturn,
+    }
+    metadataToUpdate_MUTATE[EP.toString(spyMetadata.elementPath)] = elementInstanceMetadata
   })
 
   const finalMetadata = [

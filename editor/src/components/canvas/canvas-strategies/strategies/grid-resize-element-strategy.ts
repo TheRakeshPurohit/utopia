@@ -1,11 +1,18 @@
 import { MetadataUtils } from '../../../../core/model/element-metadata-utils'
 import * as EP from '../../../../core/shared/element-path'
 import type { GridElementProperties, GridPosition } from '../../../../core/shared/element-template'
-import { offsetPoint } from '../../../../core/shared/math-utils'
-import { assertNever } from '../../../../core/shared/utils'
+import {
+  type CanvasRectangle,
+  isInfinityRectangle,
+  rectangleIntersection,
+} from '../../../../core/shared/math-utils'
 import { isCSSKeyword } from '../../../inspector/common/css-utils'
-import { GridControls, GridControlsKey, GridResizeControls } from '../../controls/grid-controls'
-import { canvasPointToWindowPoint } from '../../dom-lookup'
+import { isFixedHugFillModeApplied } from '../../../inspector/inspector-common'
+import {
+  controlsForGridPlaceholders,
+  gridEdgeToEdgePosition,
+  GridResizeControls,
+} from '../../controls/grid-controls'
 import type { CanvasStrategyFactory } from '../canvas-strategies'
 import { onlyFitWhenDraggingThisControl } from '../canvas-strategies'
 import type { InteractionCanvasState } from '../canvas-strategy-types'
@@ -15,8 +22,8 @@ import {
   strategyApplicationResult,
 } from '../canvas-strategy-types'
 import type { InteractionSession } from '../interaction-state'
-import type { TargetGridCellData } from './grid-helpers'
-import { getGridCellUnderMouse, setGridPropsCommands } from './grid-helpers'
+import { getMetadataWithGridCellBounds, setGridPropsCommands } from './grid-helpers'
+import { resizeBoundingBoxFromSide } from './resize-helpers'
 
 export const gridResizeElementStrategy: CanvasStrategyFactory = (
   canvasState: InteractionCanvasState,
@@ -37,6 +44,21 @@ export const gridResizeElementStrategy: CanvasStrategyFactory = (
     return null
   }
 
+  const selectedElementBounds = MetadataUtils.getFrameInCanvasCoords(
+    selectedElement,
+    canvasState.startingMetadata,
+  )
+  if (selectedElementBounds == null || isInfinityRectangle(selectedElementBounds)) {
+    return null
+  }
+
+  const isFillOrStretchContainer =
+    isFixedHugFillModeApplied(canvasState.startingMetadata, selectedElement, 'fill') ||
+    isFixedHugFillModeApplied(canvasState.startingMetadata, selectedElement, 'stretch')
+  if (!isFillOrStretchContainer) {
+    return null
+  }
+
   const parentGridPath = EP.parentPath(selectedElement)
 
   return {
@@ -54,13 +76,7 @@ export const gridResizeElementStrategy: CanvasStrategyFactory = (
         key: `grid-resize-controls-${EP.toString(selectedElement)}`,
         show: 'always-visible',
       },
-      {
-        control: GridControls,
-        props: { targets: [parentGridPath] },
-        key: GridControlsKey(parentGridPath),
-        show: 'always-visible',
-        priority: 'bottom',
-      },
+      controlsForGridPlaceholders(parentGridPath),
     ],
     fitness: onlyFitWhenDraggingThisControl(interactionSession, 'GRID_RESIZE_HANDLE', 1),
     apply: () => {
@@ -73,122 +89,83 @@ export const gridResizeElementStrategy: CanvasStrategyFactory = (
         return emptyStrategyApplicationResult
       }
 
-      const mouseWindowPoint = canvasPointToWindowPoint(
-        offsetPoint(
-          interactionSession.interactionData.dragStart,
-          interactionSession.interactionData.drag,
-        ),
-        canvasState.scale,
-        canvasState.canvasOffset,
-      )
+      const { metadata: container, customStrategyState: updatedCustomState } =
+        getMetadataWithGridCellBounds(
+          EP.parentPath(selectedElement),
+          canvasState.startingMetadata,
+          interactionSession.latestMetadata,
+          customState,
+        )
 
-      let targetCell: TargetGridCellData | null = customState.grid.targetCellData
-      const cellUnderMouse = getGridCellUnderMouse(mouseWindowPoint)
-      if (cellUnderMouse != null) {
-        const { cellWindowRectangle, coordinates: gridCellCoordinates } = cellUnderMouse
-        targetCell = { cellWindowRectangle, gridCellCoordinates }
-      }
-
-      if (targetCell == null) {
-        return emptyStrategyApplicationResult
-      }
-
-      const container = MetadataUtils.findElementByElementPath(
-        canvasState.startingMetadata,
-        EP.parentPath(selectedElement),
-      )
       if (container == null) {
         return emptyStrategyApplicationResult
       }
+
+      const allCellBounds = container.specialSizeMeasurements.gridCellGlobalFrames
+
+      if (allCellBounds == null) {
+        return emptyStrategyApplicationResult
+      }
+
+      const resizeBoundingBox = resizeBoundingBoxFromSide(
+        selectedElementBounds,
+        interactionSession.interactionData.drag,
+        gridEdgeToEdgePosition(interactionSession.activeControl.edge),
+        'non-center-based',
+        null,
+      )
+
+      const gridProps = getNewGridPropsFromResizeBox(resizeBoundingBox, allCellBounds)
+
+      if (gridProps == null) {
+        return emptyStrategyApplicationResult
+      }
+
       const gridTemplate = container.specialSizeMeasurements.containerGridProperties
 
-      let gridProps: GridElementProperties = MetadataUtils.findElementByElementPath(
-        canvasState.startingMetadata,
-        selectedElement,
-      )?.specialSizeMeasurements.elementGridProperties ?? {
-        gridColumnEnd: { numericalPosition: 0 },
-        gridColumnStart: { numericalPosition: 0 },
-        gridRowEnd: { numericalPosition: 0 },
-        gridRowStart: { numericalPosition: 0 },
-      }
-
-      switch (interactionSession.activeControl.edge) {
-        case 'column-start':
-          gridProps = {
-            ...gridProps,
-            gridColumnStart: { numericalPosition: targetCell.gridCellCoordinates.column },
-          }
-          break
-        case 'column-end':
-          gridProps = {
-            ...gridProps,
-            gridColumnEnd: { numericalPosition: targetCell.gridCellCoordinates.column + 1 },
-          }
-          break
-        case 'row-end':
-          gridProps = {
-            ...gridProps,
-            gridRowEnd: { numericalPosition: targetCell.gridCellCoordinates.row + 1 },
-          }
-          break
-        case 'row-start':
-          gridProps = {
-            ...gridProps,
-            gridRowStart: { numericalPosition: targetCell.gridCellCoordinates.row },
-          }
-          break
-        default:
-          assertNever(interactionSession.activeControl.edge)
-      }
-
       return strategyApplicationResult(
-        setGridPropsCommands(selectedElement, gridTemplate, gridPropsWithDragOver(gridProps)),
-        {
-          grid: { ...customState.grid, targetCellData: targetCell },
-        },
+        setGridPropsCommands(selectedElement, gridTemplate, gridProps),
+        [parentGridPath],
+        updatedCustomState ?? undefined,
       )
     },
   }
 }
 
-function orderedGridPositions({
-  start,
-  end,
-}: {
-  start: GridPosition | null
-  end: GridPosition | null
-}): {
-  start: GridPosition | null
-  end: GridPosition | null
-} {
-  if (
-    start == null ||
-    isCSSKeyword(start) ||
-    start.numericalPosition == null ||
-    end == null ||
-    isCSSKeyword(end) ||
-    end.numericalPosition == null
-  ) {
-    return { start, end }
+function getNewGridPropsFromResizeBox(
+  resizeBoundingBox: CanvasRectangle,
+  allCellBounds: CanvasRectangle[][],
+) {
+  let newRowStart = Infinity
+  let newRowEnd = -Infinity
+  let newColumnStart = Infinity
+  let newColumnEnd = -Infinity
+
+  // those cells should be occupied by the element which has an intersection with the resize box
+  for (let rowIdx = 0; rowIdx < allCellBounds.length; rowIdx++) {
+    for (let colIdx = 0; colIdx < allCellBounds[rowIdx].length; colIdx++) {
+      if (rectangleIntersection(resizeBoundingBox, allCellBounds[rowIdx][colIdx]) != null) {
+        newRowStart = Math.min(newRowStart, rowIdx + 1)
+        newColumnStart = Math.min(newColumnStart, colIdx + 1)
+        newRowEnd = Math.max(newRowEnd, rowIdx + 2)
+        newColumnEnd = Math.max(newColumnEnd, colIdx + 2)
+      }
+    }
   }
 
-  return start.numericalPosition < end.numericalPosition
-    ? { start, end }
-    : {
-        start: { numericalPosition: end.numericalPosition - 1 },
-        end: { numericalPosition: start.numericalPosition + 1 },
-      }
-}
+  if (
+    !isFinite(newRowStart) ||
+    !isFinite(newColumnStart) ||
+    !isFinite(newRowEnd) ||
+    !isFinite(newColumnEnd)
+  ) {
+    return null
+  }
 
-function gridPropsWithDragOver(props: GridElementProperties): GridElementProperties {
-  const { start: gridColumnStart, end: gridColumnEnd } = orderedGridPositions({
-    start: props.gridColumnStart,
-    end: props.gridColumnEnd,
-  })
-  const { start: gridRowStart, end: gridRowEnd } = orderedGridPositions({
-    start: props.gridRowStart,
-    end: props.gridRowEnd,
-  })
-
-  return { gridRowStart, gridRowEnd, gridColumnStart, gridColumnEnd }
+  return {
+    gridRowStart: { numericalPosition: newRowStart },
+    gridRowEnd: { numericalPosition: newRowEnd },
+    gridColumnStart: { numericalPosition: newColumnStart },
+    gridColumnEnd: { numericalPosition: newColumnEnd },
+  }
 }
